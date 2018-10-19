@@ -3,7 +3,7 @@
 
 # Import the Halite SDK, which will let you interact with the game.
 import hlt
-from hlt import constants
+from hlt import constants, commands
 from hlt.positionals import Direction, Position
 import random
 import logging
@@ -20,7 +20,6 @@ game.ready("ShuzuiBot")
 logging.info("Successfully created bot! My Player ID is {}.".format(game.my_id))
 logging.info("The game is gonna last nb turns :  {}.".format(constants.MAX_TURNS))
 
-
 """ <<<Utility functions>>> """
 
 def is_reserved(cell):
@@ -30,10 +29,33 @@ def is_available(cell):
     return cell.is_empty #and not is_reserved(cell)
 
 def is_interesting(cell):
-    return cell.halite_amount > 20
+    return cell.halite_amount > constants.MAX_HALITE * 5 / 100
+
+def distance_to_base(ship):
+    return game_map.calculate_distance(ship.position, me.shipyard.position)
+
+def need_to_rush(ship):
+    # Add arbitrary constant to distance considering that the ship may be blocked
+    remaining_turns = constants.MAX_TURNS - game.turn_number
+    return  distance_to_base(ship) + 5 >= remaining_turns
+
+def navigate_to(ship, destination):
+    if not need_to_rush(ship):
+        return game_map.naive_navigate(ship, destination)
+    else:
+        distance = distance_to_base(ship)
+        if distance == 0:
+            # If ship is already on the shipyard
+            return commands.STAY_STILL
+        elif distance == 1:
+            # If ship is next to shipyard, ignore collisions to drop halite on it
+            return game_map.get_unsafe_moves(ship.position, me.shipyard.position)[0]
+        else:
+            # Return to base safely
+            return game_map.naive_navigate(ship, me.shipyard.position)
 
 def best_around(ship, i):
-    # Create a list of position around the ship reachable in (i+1) turns, recursive
+    # Create a list of position around the ship reachable in (i+1) turns, recursively
     if i == 0:
         surrounding = ship.position.get_surrounding_cardinals()
     else:
@@ -73,25 +95,26 @@ while True:
 
     for ship in me.get_ships():
         logging.info("--> Control of ship id: {}".format(ship.id))
-        if ship.halite_amount > constants.MAX_HALITE * 95 / 100:
-            logging.info(" --> Ship is heavily loaded, return to shipyard order given")
+
+        if need_to_rush(ship) or ship.halite_amount > constants.MAX_HALITE * 95 / 100:
+            logging.info(" --> Go drop halite, treshold 1 or RUSH time")
             destination = me.shipyard.position
-            direction = game_map.naive_navigate(ship, destination)
+            direction = navigate_to(ship, destination)
             command_queue.append(ship.move(direction))
         else:
             if is_interesting(game_map[ship.position]):
-                logging.info("--> Ship is gonna collect because interesting amount halite")
+                logging.info("--> Collect")
                 command_queue.append(ship.stay_still())
             else:
                 if ship.halite_amount > constants.MAX_HALITE * 85 / 100:
-                    logging.info("--> Ship return to base even if not that fully loaded")
+                    logging.info("--> Go drop halite, treshold 2")
                     destination = me.shipyard.position
-                    direction = game_map.naive_navigate(ship, destination)
+                    direction = navigate_to(ship, destination)
                     command_queue.append(ship.move(direction))
                 else:
-                    logging.info("--> Ship is exploring to the best cell!")
+                    logging.info("--> Go to best cell in range")
                     destination = best_around(ship, 0)
-                    direction = game_map.naive_navigate(ship, destination)
+                    direction = navigate_to(ship, destination)
                     command_queue.append(ship.move(direction))
 
     if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
