@@ -8,7 +8,7 @@ import hlt
 from hlt import constants
 
 # This library contains direction metadata to better interface with the game.
-from hlt.positionals import Direction
+from hlt.positionals import Direction, Position
 
 # This library allows you to generate random numbers.
 import random
@@ -29,6 +29,8 @@ game.ready("MyPythonBot")
 # Now that your bot is initialized, save a message to yourself in the log file with some important information.
 #   Here, you log here your id, which you can always fetch from the game object by using my_id.
 logging.info("Successfully created bot! My Player ID is {}.".format(game.my_id))
+logging.info("The game is gonna last nb turns :  {}.".format(constants.MAX_TURNS))
+
 
 """ <<<Game Loop>>> """
 
@@ -40,25 +42,74 @@ while True:
     me = game.me
     game_map = game.game_map
 
+    # Global loop variables
+    reserved_positions = []
+
+    # Utility functions
+    def is_reserved(cell):
+        return cell.position in reserved_positions
+
+    def is_available(cell):
+        return cell.is_empty and not is_reserved(cell)
+
+    def best_around(ship, i):
+        # Create a list of position around the ship reachable in (i+1) turns, recursive
+        if i == 0:
+            surrounding = ship.position.get_surrounding_cardinals()
+        else:
+            x = ship.position.x
+            y = ship.position.y
+            surrounding = []
+            for k in range(-i, i+1):
+                for s in range(-i, i+1):
+                    position = Position(x+k, y+s)
+                    normalized = game_map.normalize(position)
+                    surrounding.append(normalized)
+
+        best_position = None
+        best_score = -1
+        for position in surrounding:
+            cell = game_map[position]
+            if is_available(cell) and cell.halite_amount > 15 and cell.halite_amount > best_score:
+                best_score = cell.halite_amount
+                best_position = position
+
+        if best_position is None:
+            return best_around(ship, i+1)
+        else:
+            return best_position
+
+
     # A command queue holds all the commands you will run this turn. You build this list up and submit it at the
     #   end of the turn.
     command_queue = []
 
     for ship in me.get_ships():
-        # For each of your ships, move randomly if the ship is on a low halite location or the ship is full.
-        #   Else, collect halite.
-        if game_map[ship.position].halite_amount < constants.MAX_HALITE / 10 or ship.is_full:
-            command_queue.append(
-                ship.move(
-                    random.choice([ Direction.North, Direction.South, Direction.East, Direction.West ])))
+        logging.info("--> Control of ship id: {}".format(ship.id))
+        if ship.halite_amount > constants.MAX_HALITE * 95 / 100:
+            logging.info(" --> Ship is heavily loaded, return to shipyard order given")
+            destination = me.shipyard.position
+            direction = game_map.naive_navigate(ship, destination)
+            command_queue.append(ship.move(direction))
         else:
-            command_queue.append(ship.stay_still())
+            if game_map[ship.position].halite_amount > 15:
+                logging.info("--> Ship is gonna collect because interesting amount halite")
+                command_queue.append(ship.stay_still())
+            else:
+                if ship.halite_amount > constants.MAX_HALITE * 70 / 100:
+                    logging.info("--> Ship return to base even if not that fully loaded")
+                    destination = me.shipyard.position
+                    direction = game_map.naive_navigate(ship, destination)
+                    command_queue.append(ship.move(direction))
+                else:
+                    logging.info("--> Ship is exploring to the best cell!")
+                    destination = best_around(ship, 0)
+                    direction = game_map.naive_navigate(ship, destination)
+                    command_queue.append(ship.move(direction))
+                    # reserved_pos.append(go_to)
 
-    # If the game is in the first 200 turns and you have enough halite, spawn a ship.
-    # Don't spawn a ship if you currently have a ship at port, though - the ships will collide.
     if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
         command_queue.append(me.shipyard.spawn())
 
     # Send your moves back to the game environment, ending this turn.
     game.end_turn(command_queue)
-
