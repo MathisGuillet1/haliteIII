@@ -40,6 +40,9 @@ def need_to_rush(ship):
     return  distance_to_base(ship) + 5 >= remaining_turns
 
 def navigate_to(ship, destination):
+    if ship.halite_amount < game_map[ship.position].halite_amount:
+        return commands.STAY_STILL
+
     if not need_to_rush(ship):
         return game_map.naive_navigate(ship, destination)
     else:
