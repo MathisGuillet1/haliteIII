@@ -14,8 +14,9 @@ game = hlt.Game()
 me = None
 game_map = None
 
-# Store id of first ship created
+# Initialize global variables for functions
 first_ship_id = None
+has_defended_spawn = None
 
 # Pre computing before starting
 game.ready("ShuzuiBot")
@@ -31,6 +32,10 @@ def is_reserved(cell):
 def is_available(cell):
     return cell.is_empty #and not is_reserved(cell)
 
+def is_shipyard_attacked():
+    cell = game_map[me.shipyard.position]
+    return cell.is_occupied and not me.has_ship(cell.ship.id)
+
 def is_interesting(cell):
     return cell.halite_amount > constants.MAX_HALITE * 5 / 100
 
@@ -38,7 +43,7 @@ def distance_to_base(ship):
     return game_map.calculate_distance(ship.position, me.shipyard.position)
 
 def need_to_rush(ship):
-    # Add arbitrary constant to distance considering that the ship may be blocked
+    # Add arbitrary constant to distance considering that the ship may be blocked during cst turns
     remaining_turns = constants.MAX_TURNS - game.turn_number
     return  distance_to_base(ship) + 5 >= remaining_turns
 
@@ -47,7 +52,16 @@ def navigate_to(ship, destination):
         return commands.STAY_STILL
 
     if not need_to_rush(ship):
-        return game_map.naive_navigate(ship, destination)
+        distance = distance_to_base(ship)
+        global has_defended_spawn
+        if distance == 1 and is_shipyard_attacked() and not has_defended_spawn:
+            # If an enemy is on the shipyard, use one ship to collide with it on shipyard position
+            # When spawn is blocked by an enemy, use only collide only one ship on it, let others wait
+            has_defended_spawn = True
+            return game_map.get_unsafe_moves(ship.position, me.shipyard.position)[0]
+
+        else:
+            return game_map.naive_navigate(ship, destination)
     else:
         distance = distance_to_base(ship)
         if distance == 0:
@@ -62,6 +76,7 @@ def navigate_to(ship, destination):
 
 def best_around(ship, i):
     # Create a list of position around the ship reachable in (i+1) turns, recursively
+    # Ignore cell under the ship since this function is called only when moving is required
     if i == 0:
         surrounding = ship.position.get_surrounding_cardinals()
     else:
@@ -96,6 +111,8 @@ while True:
     me = game.me
     game_map = game.game_map
 
+    has_defended_spawn = False
+
     # Queue for commands to be executed
     command_queue = []
 
@@ -103,6 +120,7 @@ while True:
     if first_ship_id == None and len(me.get_ships()) != 0:
         first_ship_id = me.get_ships()[0].id
 
+    # Make decision for each ship one by one
     for ship in me.get_ships():
         logging.info("--> Control of ship id: {}".format(ship.id))
 
@@ -119,26 +137,31 @@ while True:
             continue
 
         if need_to_rush(ship) or ship.halite_amount > constants.MAX_HALITE * 95 / 100:
+            # When a ship is almost fully loaded or just have time to return shipyard, then return to shipyard
             logging.info(" --> Go drop halite, treshold 1 or RUSH time")
             destination = me.shipyard.position
             direction = navigate_to(ship, destination)
             command_queue.append(ship.move(direction))
         else:
             if is_interesting(game_map[ship.position]):
+                # Keep collecting halite under the ship while the amount is interesting enough to collect
                 logging.info("--> Collect")
                 command_queue.append(ship.stay_still())
             else:
                 if ship.halite_amount > constants.MAX_HALITE * 85 / 100:
+                    # Lower bound of treshold to go back to a dropoff
                     logging.info("--> Go drop halite, treshold 2")
                     destination = me.shipyard.position
                     direction = navigate_to(ship, destination)
                     command_queue.append(ship.move(direction))
                 else:
+                    # Find the most interesting around the ship and move on it
                     logging.info("--> Go to best cell in range")
                     destination = best_around(ship, 0)
                     direction = navigate_to(ship, destination)
                     command_queue.append(ship.move(direction))
 
+    # Keep creating ships while number of turns played is less than 200
     if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
         command_queue.append(me.shipyard.spawn())
 
