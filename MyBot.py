@@ -14,6 +14,9 @@ game = hlt.Game()
 me = None
 game_map = None
 
+# Store id of first ship created
+first_ship_id = None
+
 # Pre computing before starting
 game.ready("ShuzuiBot")
 
@@ -96,8 +99,24 @@ while True:
     # Queue for commands to be executed
     command_queue = []
 
+    # Update first ship id
+    if first_ship_id == None and len(me.get_ships()) != 0:
+        first_ship_id = me.get_ships()[0].id
+
     for ship in me.get_ships():
         logging.info("--> Control of ship id: {}".format(ship.id))
+
+        # When playing with two players on a map, send a kamikaze to block enemy shipyard
+        if ship.id == first_ship_id and len(game.players) == 2:
+            enemy_player = None
+            for key, player in game.players.items():
+                if player.id != game.my_id:
+                    enemy_player = player
+
+            destination = enemy_player.shipyard.position
+            direction = game_map.naive_navigate(ship, destination)
+            command_queue.append(ship.move(direction))
+            continue
 
         if need_to_rush(ship) or ship.halite_amount > constants.MAX_HALITE * 95 / 100:
             logging.info(" --> Go drop halite, treshold 1 or RUSH time")
