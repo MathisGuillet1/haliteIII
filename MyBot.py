@@ -5,6 +5,7 @@
 import hlt
 from hlt import constants, commands
 from hlt.positionals import Direction, Position
+import math
 import random
 import logging
 
@@ -32,6 +33,9 @@ def is_reserved(cell):
 def is_available(cell):
     return cell.is_empty #and not is_reserved(cell)
 
+def mark_safe(cell):
+    cell.ship = None
+
 def is_shipyard_attacked():
     cell = game_map[me.shipyard.position]
     return cell.is_occupied and not me.has_ship(cell.ship.id)
@@ -46,6 +50,34 @@ def need_to_rush(ship):
     # Add arbitrary constant to distance considering that the ship may be blocked during cst turns
     remaining_turns = constants.MAX_TURNS - game.turn_number
     return  distance_to_base(ship) + 5 >= remaining_turns
+
+def minimize_move_cost(ship, directions):
+    # When there is multiple possibilities to reach destination at t turn, choose direction with lower cost
+    lowest_cost = math.inf
+    for direction in directions:
+        target_pos = ship.position.directional_offset(direction)
+        cost = game_map[target_pos].halite_amount
+        if cost < lowest_cost:
+            choice = direction
+    return choice
+
+def unsafe_navigate(ship, destination):
+    # This function return unsafe direction toward destination, chosing best lowest path cost
+    direction =  minimize_move_cost(game_map.get_unsafe_moves(ship.position, destination))
+    target_pos = ship.position.directional_offset(direction)
+    target_cell = game_map[target_pos]
+
+    mark_safe(game_map[ship.position])
+    game_map[target_cell].mark_unsafe(ship)
+
+    return direction
+
+def intending_navigate(ships):
+    # Determine the move that each ship would do if collisions were ignored
+    intentions = {}
+    for ship in ships:
+        intentions[ship.ip] = unsafe_navigate(ship, destination)
+
 
 def navigate_to(ship, destination):
     if ship.halite_amount < game_map[ship.position].halite_amount:
