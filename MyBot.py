@@ -61,14 +61,17 @@ def minimize_move_cost(ship, directions):
             choice = direction
     return choice
 
+def safe_navigate(ship, destination):
+    return game_map.naive_navigate(ship, destination)
+
 def unsafe_navigate(ship, destination):
     # This function return unsafe direction toward destination, chosing best lowest path cost
-    direction =  minimize_move_cost(game_map.get_unsafe_moves(ship.position, destination))
+    direction =  minimize_move_cost(ship, game_map.get_unsafe_moves(ship.position, destination))
     target_pos = ship.position.directional_offset(direction)
     target_cell = game_map[target_pos]
 
     mark_safe(game_map[ship.position])
-    game_map[target_cell].mark_unsafe(ship)
+    target_cell.mark_unsafe(ship)
 
     return direction
 
@@ -79,8 +82,9 @@ def intending_navigate(ships):
         intentions[ship.ip] = unsafe_navigate(ship, destination)
 
 
-def navigate_to(ship, destination):
-    if ship.halite_amount < game_map[ship.position].halite_amount:
+def navigate_to(ship, destination, steering_maker):
+    if ship.halite_amount < game_map[ship.position].halite_amount * 10 / 100:
+        # Make sure the ship has the ressources to move
         return commands.STAY_STILL
 
     if not need_to_rush(ship):
@@ -93,7 +97,7 @@ def navigate_to(ship, destination):
             return game_map.get_unsafe_moves(ship.position, me.shipyard.position)[0]
 
         else:
-            return game_map.naive_navigate(ship, destination)
+            return steering_maker(ship, destination)
     else:
         distance = distance_to_base(ship)
         if distance == 0:
@@ -104,10 +108,10 @@ def navigate_to(ship, destination):
             return game_map.get_unsafe_moves(ship.position, me.shipyard.position)[0]
         else:
             # Return to base safely
-            return game_map.naive_navigate(ship, me.shipyard.position)
+            return steering_maker(ship, me.shipyard.position)
 
 def best_around(ship, i):
-    # Create a list of position around the ship reachable in (i+1) turns, recursively
+    # Create a list of positions around the ship reachable in (i+1) turns, recursively
     # Ignore cell under the ship since this function is called only when moving is required
     if i == 0:
         surrounding = ship.position.get_surrounding_cardinals()
@@ -134,10 +138,9 @@ def best_around(ship, i):
     else:
         return best_position
 
+def make_decisions(steering_maker):
+    global game, me, game_map, command_queue, first_ship_id, has_defended_spawn
 
-""" <<<Game Loop>>> """
-
-while True:
     # Update game
     game.update_frame()
     me = game.me
@@ -172,7 +175,7 @@ while True:
             # When a ship is almost fully loaded or just have time to return shipyard, then return to shipyard
             logging.info(" --> Go drop halite, treshold 1 or RUSH time")
             destination = me.shipyard.position
-            direction = navigate_to(ship, destination)
+            direction = navigate_to(ship, destination, steering_maker)
             command_queue.append(ship.move(direction))
         else:
             if is_interesting(game_map[ship.position]):
@@ -184,14 +187,20 @@ while True:
                     # Lower bound of treshold to go back to a dropoff
                     logging.info("--> Go drop halite, treshold 2")
                     destination = me.shipyard.position
-                    direction = navigate_to(ship, destination)
+                    direction = navigate_to(ship, destination, steering_maker)
                     command_queue.append(ship.move(direction))
                 else:
                     # Find the most interesting around the ship and move on it
                     logging.info("--> Go to best cell in range")
                     destination = best_around(ship, 0)
-                    direction = navigate_to(ship, destination)
+                    direction = navigate_to(ship, destination, steering_maker)
                     command_queue.append(ship.move(direction))
+
+
+""" <<<Game Loop>>> """
+
+while True:
+    make_decisions(safe_navigate)
 
     # Keep creating ships while number of turns played is less than 200
     if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
