@@ -55,6 +55,7 @@ def find_unblocked_ship(ships_intentions):
     return None
 
 def determine_play_order(ships_intentions):
+    global crossing_ships
     ships_play_order = []
 
     # If no move intetions where determined before, return default order of ships
@@ -63,7 +64,8 @@ def determine_play_order(ships_intentions):
         return ships_play_order
 
     for ship_id, direction in ships_intentions.items():
-        if direction == Direction.Still:
+        # Priority to ships not moving and also crossing ships
+        if direction == Direction.Still or ship_id in crossing_ships:
             ships_play_order.append(ship_id)
 
     # Rmove ships which has been place in order queue
@@ -106,21 +108,22 @@ def minimize_cost_safe(ship, directions):
         cost = game_map[target_pos].halite_amount
         if cost < lowest_cost:
             global crossing_ships
-            if not target_cell.is_occupied:
+            if not target_cell.is_occupied or ship.id in crossing_ships:
                  choice = direction
-            elif ship.id in crossing_ships:
-                choice = direction
+
     if not choice:
-        return Direction.Still
-    else:
-        return choice
+        choice = Direction.Still
+    # Don't update when crossing, because set cell to safe while there actually is a ship
+    if not ship.id in crossing_ships:
+        mark_safe(game_map[ship.position])
+        target_pos = ship.position.directional_offset(choice)
+        target_cell = game_map[target_pos]
+        target_cell.mark_unsafe(ship)
+
+    return choice
 
 def safe_navigate(ship, destination):
     direction =  minimize_cost_safe(ship, game_map.get_unsafe_moves(ship.position, destination))
-    mark_safe(game_map[ship.position])
-    target_pos = ship.position.directional_offset(direction)
-    target_cell = game_map[target_pos]
-    target_cell.mark_unsafe(ship)
     return direction
 
 def unsafe_navigate(ship, destination):
@@ -191,7 +194,6 @@ def find_crossing_ships(ships, ships_intentions):
                 crossing_ships.append(ship_A.id)
                 crossing_ships.append(ship_B.id)
                 intentions.pop(ship_B.id)
-                logging.info("Ship {} at position {} will cross with ship {} at position {}".format(ship_A.id, ship_A.position, ship_B.id, ship_B.position))
                 break
 
 
@@ -246,13 +248,13 @@ def make_decisions(steering_maker, ships_intentions):
     ships = me._ships
     for ship_id in ships_play_order:
         ship = ships[ship_id]
-        logging.info("--> Control of ship id: {}".format(ship.id))
+        #logging.info("--> Control of ship id: {}".format(ship.id))
 
         """ Entering in the main decision tree, making a choice independently of game state """
 
         if need_to_rush(ship) or ship.halite_amount > constants.MAX_HALITE * 95 / 100:
             # When a ship is almost fully loaded or just have time to return shipyard, then return to shipyard
-            logging.info(" --> Go drop halite, treshold 1 or RUSH time")
+            #logging.info(" --> Go drop halite, treshold 1 or RUSH time")
             destination = me.shipyard.position
             direction = navigate_to(ship, destination, steering_maker)
             ships_intentions[ship.id] = direction
@@ -261,14 +263,14 @@ def make_decisions(steering_maker, ships_intentions):
 
         if is_interesting(game_map[ship.position]):
             # Keep collecting halite under the ship while the amount is interesting enough to collect
-            logging.info("--> Collect")
+            #logging.info("--> Collect")
             ships_intentions[ship.id] = Direction.Still
             command_queue.append(ship.stay_still())
             continue
 
         if ship.halite_amount > constants.MAX_HALITE * 85 / 100:
             # Lower bound of treshold to go back to a dropoff
-            logging.info("--> Go drop halite, treshold 2")
+            #logging.info("--> Go drop halite, treshold 2")
             destination = me.shipyard.position
             direction = navigate_to(ship, destination, steering_maker)
             ships_intentions[ship.id] = direction
@@ -276,7 +278,7 @@ def make_decisions(steering_maker, ships_intentions):
             continue
         else:
             # Find the most interesting around the ship and move on it
-            logging.info("--> Go to best cell in range")
+            #logging.info("--> Go to best cell in range")
             destination = best_around(ship, 0)
             direction = navigate_to(ship, destination, steering_maker)
             ships_intentions[ship.id] = direction
@@ -288,16 +290,16 @@ def make_decisions(steering_maker, ships_intentions):
 """ <<<Game Loop>>> """
 while True:
     # Shortands for functions
-    global me, game_map
+    global me, game_map, crossing_ships
 
     game.update_frame()
     me = game.me
     game_map = game.game_map
+    crossing_ships = []
 
     """ Let's first determine what ships would like to do (where they would like to move) """
     ships_intentions = make_decisions(unsafe_navigate, {})[0]
 
-    global crossing_ships
     crossing_ships = find_crossing_ships(me.get_ships(), ships_intentions)
 
     """ In a second time, we know how ships want to move, and we can determine a play order
