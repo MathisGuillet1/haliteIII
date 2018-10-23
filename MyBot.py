@@ -9,6 +9,9 @@ import math, random, logging, copy
 
 game = hlt.Game()
 
+# Global varaibles
+interesting_treshold = 5 / 100
+
 game.ready("ShuzuiBot")
 
 logging.info("Successfully created bot! My Player ID is {}.".format(game.my_id))
@@ -22,7 +25,7 @@ def is_shipyard_attacked():
     return cell.is_occupied and not me.has_ship(cell.ship.id)
 
 def is_interesting(cell):
-    return cell.halite_amount > constants.MAX_HALITE * 1 / 100
+    return cell.halite_amount > constants.MAX_HALITE * interesting_treshold
 
 def distance_to_base(ship):
     return game_map.calculate_distance(ship.position, me.shipyard.position)
@@ -150,6 +153,11 @@ def navigate_to(ship, destination, steering_maker):
             return steering_maker(ship, me.shipyard.position)
 
 def best_around(ship, i):
+    # Reset recursion when no cell greater than intresting treshold found
+    if(i > game_map.width / 2):
+        interesting_treshold -= 1 / 100
+        return best_around(ship, 0)
+
     # Create a list of positions around the ship reachable in (i+1) turns, recursively
     # Ignore cell under the ship since this function is called only when moving is required
     if i == 0:
@@ -160,9 +168,11 @@ def best_around(ship, i):
         surrounding = []
         for k in range(-i, i+1):
             for s in range(-i, i+1):
-                position = Position(x+k, y+s)
-                normalized = game_map.normalize(position)
-                surrounding.append(normalized)
+                # Keep only edges since it is recursive
+                if k == -i or k == i or s == -i or s == i:
+                    position = Position(x+k, y+s)
+                    normalized = game_map.normalize(position)
+                    surrounding.append(normalized)
 
     best_position = None
     best_score = -1
