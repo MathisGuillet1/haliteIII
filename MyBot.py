@@ -104,8 +104,12 @@ def minimize_cost_safe(ship, directions):
         target_pos = ship.position.directional_offset(direction)
         target_cell = game_map[target_pos]
         cost = game_map[target_pos].halite_amount
-        if cost < lowest_cost and not target_cell.is_occupied:
-            choice = direction
+        if cost < lowest_cost:
+            global crossing_ships
+            if not target_cell.is_occupied:
+                 choice = direction
+            elif ship.id in crossing_ships:
+                choice = direction
     if not choice:
         return Direction.Still
     else:
@@ -152,8 +156,50 @@ def navigate_to(ship, destination, steering_maker):
             # Return to base safely
             return steering_maker(ship, me.shipyard.position)
 
+def order_by_distance(ships):
+    ships_distances = {}
+    for ship in ships:
+        ships_distances[ship.id] = distance_to_base(ship)
+
+    ordered_ships= []
+    for key in sorted(ships_distances, key=ships_distances.get):
+        ordered_ships.append(key)
+
+    return ordered_ships
+
+def find_crossing_ships(ships, ships_intentions):
+    # Find ships that are crossing by pairs
+    intentions = copy.deepcopy(ships_intentions)
+    crossing_ships = []
+    ordered_ships = order_by_distance(ships)
+    for ship_id in ordered_ships:
+        if ship_id in crossing_ships:
+            continue
+        # Determine where is going this ship A
+        ship_A = me.get_ship(ship_id)
+        direction_A = intentions[ship_A.id]
+        destination_A = ship_A.position.directional_offset(direction_A)
+        intentions.pop(ship_A.id)
+        # Try to find a ship to pair with
+        for key in intentions:
+            ship_B = me.get_ship(key)
+            direction_B = intentions[ship_B.id]
+            destination_B = ship_B.position.directional_offset(direction_B)
+            # The ship B to pair is where the ship is going, then check if ship B is going on ship A position
+            if ship_B.position == destination_A and ship_A.position == destination_B:
+                # A crossing is happening, update list of crossing, and remaining
+                crossing_ships.append(ship_A.id)
+                crossing_ships.append(ship_B.id)
+                intentions.pop(ship_B.id)
+                logging.info("Ship {} at position {} will cross with ship {} at position {}".format(ship_A.id, ship_A.position, ship_B.id, ship_B.position))
+                break
+
+
+    return crossing_ships
+
 def best_around(ship, i):
     # Reset recursion when no cell greater than intresting treshold found
+    global interesting_treshold
     if(i > game_map.width / 2):
         interesting_treshold -= 1 / 100
         return best_around(ship, 0)
@@ -250,6 +296,9 @@ while True:
 
     """ Let's first determine what ships would like to do (where they would like to move) """
     ships_intentions = make_decisions(unsafe_navigate, {})[0]
+
+    global crossing_ships
+    crossing_ships = find_crossing_ships(me.get_ships(), ships_intentions)
 
     """ In a second time, we know how ships want to move, and we can determine a play order
     that allow a maximum of ships to move instead of iterating randomly through ships """
