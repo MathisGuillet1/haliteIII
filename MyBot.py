@@ -5,24 +5,19 @@
 import hlt
 from hlt import constants, commands
 from hlt.positionals import Direction, Position
-import math
-import random
-import logging
-import copy
+import math, random, logging, copy
 
 game = hlt.Game()
 
-# Declare global variables as shortands
+# Declare global variables as shortands for functions
 me = None
 game_map = None
 
 # Initialize global variables for functions
-first_ship_id = None
 has_defended_spawn = None
 ships_play_order = None
 ships_intentions = None
 
-# Pre computing before starting
 game.ready("ShuzuiBot")
 
 logging.info("Successfully created bot! My Player ID is {}.".format(game.my_id))
@@ -43,7 +38,7 @@ def is_shipyard_attacked():
     return cell.is_occupied and not me.has_ship(cell.ship.id)
 
 def is_interesting(cell):
-    return cell.halite_amount > constants.MAX_HALITE * 5 / 100
+    return cell.halite_amount > constants.MAX_HALITE * 1 / 100
 
 def distance_to_base(ship):
     return game_map.calculate_distance(ship.position, me.shipyard.position)
@@ -54,6 +49,10 @@ def need_to_rush(ship):
     return  distance_to_base(ship) + 5 >= remaining_turns
 
 def find_unblocked_ship(ships_intentions):
+    # Create deep copies og game instance to keep safe original game object and reuse it later
+    me = copy.deepcopy(game.me)
+    game_map = copy.deepcopy(game.game_map)
+
     # Find a ship that can move and lock position desired by the ship
     for ship_id, direction in ships_intentions.items():
         ship = me.get_ship(ship_id)
@@ -117,7 +116,6 @@ def minimize_cost_safe(ship, directions):
         target_pos = ship.position.directional_offset(direction)
         target_cell = game_map[target_pos]
         cost = game_map[target_pos].halite_amount
-        logging.info("cell destination, is occupied? : {}".format(target_cell.is_occupied))
         if cost < lowest_cost and not target_cell.is_occupied:
             choice = direction
     if not choice:
@@ -137,7 +135,6 @@ def unsafe_navigate(ship, destination):
     # This function return unsafe direction toward destination, chosing best lowest path cost
     direction =  minimize_cost_unsafe(ship, game_map.get_unsafe_moves(ship.position, destination))
     return direction
-
 
 def navigate_to(ship, destination, steering_maker):
     if not need_to_rush(ship):
@@ -196,52 +193,24 @@ def best_around(ship, i):
         return best_position
 
 def make_decisions(steering_maker):
-    global game, me, game_map, command_queue, first_ship_id, has_defended_spawn, ships_intentions
-    # Create deep copies og game instance to keep safe original game object and reuse it later
-    me = copy.deepcopy(game.me)
-    game_map = copy.deepcopy(game.game_map)
+    global command_queue, first_ship_id, has_defended_spawn, ships_intentions
 
     has_defended_spawn = False
-
     # Queue for commands to be executed
     command_queue = []
-
     # Determine in which order, making decision for each ship, thanks to a list indicating how to iterate
     determine_play_order(ships_intentions)
-
     # Commands itentions of Ships
     ships_intentions = {}
-
-    # Update first ship id
-    if first_ship_id == None and len(me.get_ships()) != 0:
-        first_ship_id = me.get_ships()[0].id
-
-    me = copy.deepcopy(game.me)
-    game_map = copy.deepcopy(game.game_map)
-
     # Dictionnary of ships with ship id as key
     ships = me._ships
-
-    logging.info("DECISION : {}".format(ships_play_order))
 
     # Make decision for each ship one by one
     for ship_id in ships_play_order:
         ship = ships[ship_id]
         logging.info("--> Control of ship id: {}".format(ship.id))
 
-        """
-        # When playing with two players on a map, send a kamikaze to block enemy shipyard
-        if ship.id == first_ship_id and len(game.players) == 2:
-            enemy_player = None
-            for key, player in game.players.items():
-                if player.id != game.my_id:
-                    enemy_player = player
-
-            destination = enemy_player.shipyard.position
-            direction = game_map.naive_navigate(ship, destination)
-            command_queue.append(ship.move(direction))
-            continue
-        """
+        """ Entering in the main decision tree, making a choice independently of game state """
 
         if need_to_rush(ship) or ship.halite_amount > constants.MAX_HALITE * 95 / 100:
             # When a ship is almost fully loaded or just have time to return shipyard, then return to shipyard
@@ -277,24 +246,20 @@ def make_decisions(steering_maker):
 
 while True:
     game.update_frame()
+    me = game.me
+    game_map = game.game_map
 
     # Commands itentions of Ships
     ships_intentions = {}
 
     # Let's first determine what ships would like to do (where they would like to move)
     make_decisions(unsafe_navigate)
-    logging.info("After unsafe")
-
-    logging.info(command_queue)
 
     # Between the two steps of the decision process, most of global variables are reset
 
     # In a second time, we know how ships want to move, and we can determine a play order
     # that allow a maximum of ships to move instead of iterating randomly through ships
     make_decisions(safe_navigate)
-    logging.info("After safe")
-
-    logging.info(command_queue)
 
     # Keep creating ships while number of turns played is less than 200
     if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
