@@ -5,7 +5,7 @@
 import hlt
 from hlt import constants, commands
 from hlt.positionals import Direction, Position
-import math, random, logging, copy
+import math, random, logging, copy, time
 
 game = hlt.Game()
 
@@ -35,20 +35,16 @@ def need_to_rush(ship):
     remaining_turns = constants.MAX_TURNS - game.turn_number
     return  distance_to_base(ship) + 5 >= remaining_turns
 
-def find_unblocked_ship(ships_intentions):
-    # Create deep copies og game instance to keep safe original game object and reuse it later
-    me = copy.deepcopy(game.me)
-    game_map = copy.deepcopy(game.game_map)
-
+def find_unblocked_ship(ships_intentions, me_copy, game_copy):
     # Find a ship that can move and lock position desired by the ship
     for ship_id, direction in ships_intentions.items():
-        ship = me.get_ship(ship_id)
+        ship = me_copy.get_ship(ship_id)
         target_pos = ship.position.directional_offset(direction)
-        target_cell = game_map[target_pos]
+        target_cell = game_copy[target_pos]
 
         if not target_cell.is_occupied:
             # Update map info
-            mark_safe(game_map[ship.position])
+            mark_safe(game_copy[ship.position])
             target_cell.mark_unsafe(ship)
             return ship
 
@@ -73,8 +69,11 @@ def determine_play_order(ships_intentions):
         ships_intentions.pop(ship_id)
 
     can_move = True
+    # Create copies to not modify original map since marks on cells will be set
+    me_copy = copy.deepcopy(game.me)
+    game_copy = copy.deepcopy(game.game_map)
     while can_move:
-        ship = find_unblocked_ship(ships_intentions)
+        ship = find_unblocked_ship(ships_intentions, me_copy, game_copy)
         if ship != None:
             ships_play_order.append(ship.id)
             ships_intentions.pop(ship.id)
@@ -196,7 +195,6 @@ def find_crossing_ships(ships, ships_intentions):
                 intentions.pop(ship_B.id)
                 break
 
-
     return crossing_ships
 
 def best_around(ship, i):
@@ -292,6 +290,7 @@ while True:
     # Shortands for functions
     global me, game_map, crossing_ships
 
+    start_time = time.time()
     game.update_frame()
     me = game.me
     game_map = game.game_map
@@ -309,5 +308,7 @@ while True:
     # Keep creating ships while number of turns played is less than 200
     if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
         command_queue.append(me.shipyard.spawn())
+
+    logging.info("Time elapsed to decide this turn: {}".format(time.time() - start_time))
 
     game.end_turn(command_queue)
