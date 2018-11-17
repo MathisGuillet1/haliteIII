@@ -12,7 +12,7 @@ game = hlt.Game()
 # Global varaibles
 interesting_treshold = 5 / 100
 
-game.ready("futureBot")
+game.ready("shuzuiBot")
 logging.info("Successfully created bot! My Player ID is {}.".format(game.my_id))
 
 def mark_safe(cell):
@@ -67,27 +67,24 @@ def order_by_distance(ships):
 
     return ordered_ships
 
-def best_around(ship, i):
+def best_around(ship, i=1):
     # Reset recursion when no cell greater than intresting treshold found
     global interesting_treshold
     if(i > game_map.width / 2):
         interesting_treshold -= 1 / 100
-        return best_around(ship, 0)
+        return best_around(ship)
 
     # Create a list of positions around the ship reachable in (i+1) turns, recursively
-    if i == 0:
-        surrounding = ship.position.get_surrounding_cardinals()
-    else:
-        x = ship.position.x
-        y = ship.position.y
-        surrounding = []
-        for k in range(-i, i+1):
-            for s in range(-i, i+1):
-                # Keep only edges since it is recursive
-                if k == -i or k == i or s == -i or s == i:
-                    position = Position(x+k, y+s)
-                    normalized = game_map.normalize(position)
-                    surrounding.append(normalized)
+    x = ship.position.x
+    y = ship.position.y
+    surrounding = []
+    for k in range(-i, i+1):
+        for s in range(-i, i+1):
+            # Keep only edges since it is recursive
+            if (abs(k) + abs(s)) == i:
+                position = Position(x+k, y+s)
+                normalized = game_map.normalize(position)
+                surrounding.append(normalized)
 
     best_position = None
     best_score = -1
@@ -114,7 +111,7 @@ def find_destination(ship):
         destination = me.shipyard.position
     else:
         # Find the most interesting around the ship and move on it
-        destination = best_around(ship, 0)
+        destination = best_around(ship)
 
     return destination
 
@@ -223,7 +220,6 @@ def make_decisions():
         destination = find_destination(ship)
         crossing_ship = find_crossing_ship(ship, destination, ships_play_order)
         if crossing_ship:
-            # OPTIMIZE THIS SHIT
             direction_ship = game_map.get_unsafe_moves(ship.position, crossing_ship.position)[0]
             direction_ship_crossing = game_map.get_unsafe_moves(crossing_ship.position, ship.position)[0]
             command_queue.append(ship.move(direction_ship))
