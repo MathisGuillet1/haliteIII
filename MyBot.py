@@ -133,7 +133,7 @@ def safe_direction_to(ship, destination):
     return choice
 
 def navigate_to(ship, destination):
-    if destination == ship.position:
+    if destination == ship.position or not has_fuel(ship):
         return Direction.Still
 
     if need_to_rush(ship):
@@ -146,10 +146,6 @@ def navigate_to(ship, destination):
         else:
             # Return to base safely
             return safe_direction_to(ship, me.shipyard.position)
-
-    if not has_fuel(ship):
-        # Make sure the ship has the ressources to move
-        return Direction.Still
 
     distance = distance_to_base(ship)
     global has_defended_spawn
