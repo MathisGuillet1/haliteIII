@@ -24,26 +24,52 @@ def mark_reserved(cell):
 def has_fuel(ship):
     return ship.halite_amount >= game_map[ship.position].halite_amount * 10 / 100
 
+def fleet_size():
+    return len(me.get_ships())
+
 def is_reserved(cell):
     if hasattr(cell, 'reserved'):
         return cell.reserved
     else:
         return False
 
-def is_shipyard_attacked():
-    cell = game_map[me.shipyard.position]
+def has_defended_dropoff(position):
+    cell = game_map[position]
+    if hasattr(cell, 'defended'):
+        return cell.defended
+    else:
+        cell.defended = True
+        return False
+
+def is_dropoff_attacked(position):
+    cell = game_map[position]
     return cell.is_occupied and not me.has_ship(cell.ship.id)
 
 def is_interesting(cell):
     return cell.halite_amount > constants.MAX_HALITE * interesting_treshold
 
-def distance_to_base(ship):
-    return game_map.calculate_distance(ship.position, me.shipyard.position)
+def distance_to_dropoff(ship):
+    return game_map.calculate_distance(ship.position, closest_dropoff(ship))
 
 def need_to_rush(ship):
     # Add arbitrary constant to distance considering that the ship may be blocked during X turns
     remaining_turns = constants.MAX_TURNS - game.turn_number
-    return  distance_to_base(ship) + 7 >= remaining_turns
+    return  distance_to_dropoff(ship) + 7 >= remaining_turns
+
+def closest_dropoff(ship):
+    dropoffs = me.get_dropoffs()
+    positions = [drop.position for drop in dropoffs]
+    positions.append(me.shipyard.position)
+
+    best_dropoff = None
+    min_distance = math.inf
+    for position in positions:
+        distance = game_map.calculate_distance(ship.position, position)
+        if distance < min_distance:
+            min_distance = distance
+            best_dropoff = position
+
+    return best_dropoff
 
 def get_unsafe_positions(ship, destination):
     directions = game_map.get_unsafe_moves(ship.position, destination)
@@ -56,10 +82,10 @@ def get_unsafe_positions(ship, destination):
     return positions
 
 def order_by_distance(ships):
-    # Ships sorted by descending order to base
+    # Ships sorted by descending order with distance to a dropoff
     ships_distances = {}
     for ship in ships:
-        ships_distances[ship.id] = distance_to_base(ship)
+        ships_distances[ship.id] = distance_to_dropoff(ship)
 
     ordered_ships = []
     for key in sorted(ships_distances, key=ships_distances.get, reverse=True):
@@ -70,7 +96,7 @@ def order_by_distance(ships):
 def best_around(ship, i=1):
     # Reset recursion when no cell greater than intresting treshold found
     global interesting_treshold
-    if(i > game_map.width / 2):
+    if(i > game_map.width):
         interesting_treshold -= 1 / 100
         return best_around(ship)
 
@@ -101,14 +127,14 @@ def best_around(ship, i=1):
 
 def find_destination(ship):
     if need_to_rush(ship) or ship.halite_amount > constants.MAX_HALITE * 95 / 100:
-        # When a ship is almost fully loaded or just have time to return shipyard, then return to shipyard
-        destination = me.shipyard.position
+        # When a ship is almost fully loaded or just have time to return a dropoff, then return to dropoff
+        destination = closest_dropoff(ship)
     elif is_interesting(game_map[ship.position]):
         # Keep collecting halite under the ship while the amount is interesting enough to collect
         destination = ship.position
     elif ship.halite_amount > constants.MAX_HALITE * 85 / 100:
         # Lower bound of treshold to go back to a dropoff
-        destination = me.shipyard.position
+        destination = closest_dropoff(ship)
     else:
         # Find the most interesting around the ship and move on it
         destination = best_around(ship)
@@ -137,23 +163,22 @@ def navigate_to(ship, destination):
         return Direction.Still
 
     if need_to_rush(ship):
-        distance = distance_to_base(ship)
+        distance = distance_to_dropoff(ship)
         if distance == 0:
             return Direction.Still
         elif distance == 1:
             # Ignore collisions over dropoffs cells
-            return game_map.get_unsafe_moves(ship.position, me.shipyard.position)[0]
+            return game_map.get_unsafe_moves(ship.position, closest_dropoff(ship))[0]
         else:
-            # Return to base safely
-            return safe_direction_to(ship, me.shipyard.position)
+            # Return to dropoff safely
+            return safe_direction_to(ship, closest_dropoff(ship))
 
-    distance = distance_to_base(ship)
-    global has_defended_spawn
-    if distance == 1 and is_shipyard_attacked() and not has_defended_spawn:
-        # If an enemy is on the shipyard, use one ship to collide with it on shipyard position
+    dropoff_pos = closest_dropoff(ship)
+    dropoff_dist = game_map.calculate_distance(ship.position, dropoff_pos)
+    if dropoff_dist == 1 and is_dropoff_attacked(dropoff_pos) and not has_defended_dropoff(dropoff_pos):
+        # If an enemy is on a dropoff, use one ship to collide with it on dropoff position
         # When spawn is blocked by an enemy, use only one ship to make the way, others wait
-        has_defended_spawn = True
-        return game_map.get_unsafe_moves(ship.position, me.shipyard.position)[0]
+        return game_map.get_unsafe_moves(ship.position, dropoff_pos)[0]
 
     return safe_direction_to(ship, destination)
 
@@ -178,9 +203,6 @@ def find_crossing_ship(ship_A, destination_A, ships_play_order):
 
 def make_decisions():
     ships = me.get_ships()
-    # Varaible to know if a ship has to collide on spawn with enemy
-    global has_defended_spawn
-    has_defended_spawn = False
     # Queue for commands to be executed
     command_queue = []
     # Determine in which order, making decision for each ship
@@ -190,6 +212,7 @@ def make_decisions():
     ship_moving = True
     while ships_play_order and ship_moving:
         ship_moving = False
+
         for ship_id in ships_play_order:
             ship = me.get_ship(ship_id)
             destination = find_destination(ship)
