@@ -5,7 +5,7 @@
 import hlt
 from hlt import constants, commands
 from hlt.positionals import Direction, Position
-import math, logging, time
+import math, logging, time, numpy as np
 
 game = hlt.Game()
 
@@ -51,10 +51,30 @@ def is_interesting(cell):
 def distance_to_dropoff(ship):
     return game_map.calculate_distance(ship.position, closest_dropoff(ship))
 
+def grid_distance_to_dropoff(ship):
+    return grid_distance(ship.position, closest_dropoff(ship))
+
 def need_to_rush(ship):
     # Add arbitrary constant to distance considering that the ship may be blocked during X turns
     remaining_turns = constants.MAX_TURNS - game.turn_number
     return  distance_to_dropoff(ship) + 7 >= remaining_turns
+
+def grid_distance(position_A, position_B):
+    # compute distance with 8 connectivity between two positions
+    dx = abs(position_B.x - position_A.x)
+    dy = abs(position_B.y - position_A.y)
+
+    # toric map
+    dx = min(dx, game_map.width - dx)
+    dy = min(dy, game_map.height - dy)
+
+    minimum = min(dx, dy)
+    maximum = max(dx, dy)
+
+    diagonal_steps = minimum
+    straight_steps = maximum - minimum
+
+    return int(math.sqrt(2) * diagonal_steps + straight_steps)
 
 def closest_dropoff(ship):
     dropoffs = me.get_dropoffs()
@@ -92,6 +112,13 @@ def order_by_distance(ships):
         ordered_ships.append(key)
 
     return ordered_ships
+
+def create_scanned_map(range=5):
+    scanned = np.zeros((game_map.width, game_map.height))
+
+    for i in range(game_map.width):
+        for j in range(game_map.height):
+            scanned[i][j] = compute_interest(i, j, range)
 
 def best_around(ship, i=1):
     # Reset recursion when no cell greater than intresting treshold found
@@ -217,6 +244,20 @@ def make_decisions():
             ship = me.get_ship(ship_id)
             destination = find_destination(ship)
 
+            """ CONSTRUCTION """
+
+            if me.halite_amount > constants.DROPOFF_COST and not game_map[ship.position].has_structure and \
+                grid_distance_to_dropoff(ship) > 15 and fleet_size() > 15 and game.turn_number < 350:
+
+                command_queue.append(ship.make_dropoff())
+                me.halite_amount -= constants.DROPOFF_COST
+                # free cell
+                ship_moving = True
+                ships_play_order.remove(ship_id)
+                break
+
+            """ CONSTRUCTION """
+
             # Determine the best command to reach destination
             direction = navigate_to(ship, destination)
             if direction:
@@ -274,7 +315,7 @@ while True:
     command_queue = make_decisions()
 
     # Keep creating ships while number of turns played is less than 200
-    if game.turn_number <= 200 and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
+    if game.turn_number <= (constants.MAX_TURNS / 2) and me.halite_amount >= constants.SHIP_COST and not game_map[me.shipyard].is_occupied:
         command_queue.append(me.shipyard.spawn())
 
     logging.info("Time elapsed to make a decision this turn: {}".format(time.time() - start_time))

@@ -3,3 +3,4 @@ halite
 !/replays/README.md
 hlt/__pycache__/*
 *.log
+referenceBot.py
